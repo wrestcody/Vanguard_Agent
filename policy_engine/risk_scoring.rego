@@ -1,27 +1,22 @@
 # policy_engine/risk_scoring.rego
 package vanguard.risk_scoring
 
-default refined_score = "Low"
+# Default to the input severity if no other rules match.
+default refined_risk_score = input.severity
 
-# If a High-severity finding occurs on an asset tagged CUI/FedRAMP,
-# its Refined Risk Score becomes Critical.
-refined_score = "Critical" {
+# --- Critical Risk Rule ---
+# If severity is "High" AND the asset is tagged with "CUI" OR "FedRAMP_Critical",
+# the refined_risk_score is "Critical".
+refined_risk_score = "Critical" {
     input.severity == "High"
-    contains(input.tags, "CUI/FedRAMP")
+    critical_tags := {"CUI", "FedRAMP_Critical"}
+    count({tag | tag := input.tags[_]; critical_tags[tag]}) > 0
 }
 
-# Medium-severity findings on Production assets are elevated to High.
-refined_score = "High" {
-    input.severity == "Medium"
-    contains(input.tags, "Production")
-}
-
-# All other High-severity findings are just High.
-refined_score = "High" {
+# --- Mitigated Risk (Example) ---
+# If a specific mitigation is in place, the risk can be downgraded.
+# This is a placeholder for more complex GRC logic.
+refined_risk_score = "Medium" {
+    input.mitigated == true
     input.severity == "High"
-}
-
-# All other Medium-severity findings are just Medium.
-refined_score = "Medium" {
-    input.severity == "Medium"
 }
