@@ -139,21 +139,35 @@ def send_to_praetorium_nexus(payload):
         payload (dict): The final enriched payload.
     """
     logger.info("Transmitting enriched payload to Praetorium Nexus.")
-    nexus_api_url = os.environ.get("NEXUS_API_URL", "https://praetorium-nexus.example.com/api/v1/grc-events")
-    api_key = os.environ.get("NEXUS_API_KEY", "mock_api_key")
+    try:
+        nexus_api_url = os.environ["NEXUS_API_URL"]
+        api_key = os.environ["NEXUS_API_KEY"]
+    except KeyError as e:
+        logger.error(f"Missing required environment variable: {e}")
+        raise
+
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     try:
+        # The actual request is commented out to prevent real calls during testing.
         # response = requests.post(nexus_api_url, json=payload, headers=headers, timeout=10)
-        # response.raise_for_status()
+        # response.raise_for_status() # Raises an HTTPError for bad responses (4xx or 5xx)
 
-        # Mocking the transmission
+        # Mocking the transmission for local testing
         logger.info(f"Successfully sent payload to {nexus_api_url}.")
         logger.debug(f"Payload sent: {json.dumps(payload, indent=2)}")
 
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"HTTP Error {e.response.status_code} for {e.response.url}: {e.response.text}")
+        raise
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection error to Praetorium Nexus: {e}")
+        raise
+    except requests.exceptions.Timeout as e:
+        logger.error(f"Request to Praetorium Nexus timed out: {e}")
+        raise
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to send payload to Praetorium Nexus: {e}")
-        # In a real-world scenario, you might add this to a dead-letter queue.
+        logger.error(f"An unexpected error occurred while sending to Praetorium Nexus: {e}")
         raise
 
 # --- Main Handler for Lambda ---
@@ -164,19 +178,10 @@ def lambda_handler(event, context):
     """
     logger.info("Vanguard_Agent processing started.")
     try:
-        # 1. Ingest and validate the CCE data
         cce_data = ingest_cce_data(event)
-
-        # 2. Get contextual risk score from OPA
         refined_score = get_contextual_risk_score(cce_data)
-
-        # 3. Generate a non-technical summary
         summary = generate_nl_summary(cce_data, refined_score)
-
-        # 4. Construct the final enriched payload
         final_payload = construct_final_payload(refined_score, summary, cce_data)
-
-        # 5. Send the payload to the downstream API
         send_to_praetorium_nexus(final_payload)
 
         logger.info("Vanguard_Agent processing completed successfully.")
@@ -195,16 +200,25 @@ def lambda_handler(event, context):
 # --- Example Usage (for local testing) ---
 
 if __name__ == '__main__':
-    # Mock CCE payload from KSI_Engine, aligned with schema
+    # Set mock environment variables for local testing
+    os.environ['NEXUS_API_URL'] = 'https://praetorium-nexus.example.com/api/v1/grc-events'
+    os.environ['NEXUS_API_KEY'] = 'mock_api_key_for_local_test'
+
+    # Mock CCE payload simulating a "High" severity CM-6 violation on a CUI-tagged asset
     mock_cce_payload = {
-        "asset_id": "arn:aws:s3:::sensitive-cui-data-bucket",
+        "asset_id": "arn:aws:s3:::sensitive-cui-data-bucket-123",
         "severity": "High",
         "control_id": "CM-6",
-        "description": "S3 bucket has public read access.",
-        "tags": ["CUI", "Production"],
+        "description": "S3 bucket is publicly accessible, violating NIST CM-6.",
+        "tags": ["CUI", "Production", "FedRAMP_Critical"],
         "mitigated": False
     }
 
     print("--- Running Local Test ---")
-    lambda_handler(mock_cce_payload, None)
-    print("--- Local Test Complete ---")
+    result = lambda_handler(mock_cce_payload, None)
+    print("\n--- Final Enriched Payload (Logged during transmission) ---")
+    # The payload is logged by the send_to_praetorium_nexus function
+
+    print("\n--- Lambda Handler Result ---")
+    print(json.dumps(result, indent=2))
+    print("\n--- Local Test Complete ---")
